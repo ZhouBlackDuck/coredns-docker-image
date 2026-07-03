@@ -5,7 +5,6 @@ on:
   workflow_run:
     workflows: ["Release Notifier"]
     types: [completed]
-  workflow_dispatch: 
 
 jobs:
   build:
@@ -31,10 +30,7 @@ jobs:
             --label "upstream-release" \
             --state open \
             --json number,title,author \
-            --jq '[.[] | select(.author.login == "github-actions[bot]")]')
-
-          echo "$ISSUES"
-          gh issue list --repo "${{ github.repository }}" --label "upstream-release" --state open --json number,title,author
+            --jq '[.[] | select(.author.login == "app/github-actions" && .author.is_bot == true)]')
 
           COUNT=$(echo "$ISSUES" | jq 'length')
           if [ "$COUNT" -eq 0 ]; then
