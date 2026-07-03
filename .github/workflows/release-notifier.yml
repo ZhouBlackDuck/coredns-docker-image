@@ -1,0 +1,20 @@
+name: Release Notifier
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每天 UTC 00:00 检查上游是否有新 release
+    - cron: "0 0 * * *"
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check upstream release
+        uses: maheshrayas/action-release-notifier@v2.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          type: Github
+          repo: "https://github.com/dokku/coredns-docker"
+          days: 1
+          labels: "upstream-release"

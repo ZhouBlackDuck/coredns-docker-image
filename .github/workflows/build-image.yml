@@ -1,0 +1,126 @@
+name: Build and Push Docker Image
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  build:
+    # 仅处理由 release-notifier 开启的 issue（带 upstream-release 标签）
+    if: contains(github.event.issue.labels.*.name, 'upstream-release')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      issues: write
+
+    steps:
+      - name: Extract upstream release tag from issue
+        id: extract_tag
+        run: |
+          # issue 标题格式通常为: "New release: <repo> <tag>"
+          ISSUE_TITLE="${{ github.event.issue.title }}"
+          # 提取版本号（最后一个空格后的内容）
+          UPSTREAM_TAG=$(echo "$ISSUE_TITLE" | grep -oP '[\d]+\.[\d]+\.[\d]+' | head -1)
+          if [ -z "$UPSTREAM_TAG" ]; then
+            echo "::error::Cannot extract tag from issue title: $ISSUE_TITLE"
+            exit 1
+          fi
+          echo "tag=${UPSTREAM_TAG}" >> "$GITHUB_OUTPUT"
+          echo "Detected upstream tag: ${UPSTREAM_TAG}"
+
+      - name: Check if tag already exists in registry
+        id: check_tag
+        env:
+          TAG: ${{ steps.extract_tag.outputs.tag }}
+        run: |
+          REPO="${{ github.repository }}"
+          IMAGE="ghcr.io/${REPO,,}"
+          # 尝试检查 manifest，如果已存在则跳过
+          if docker manifest inspect "${IMAGE}:${TAG}" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag ${TAG} already exists, skipping build."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Tag ${TAG} is new, proceeding with build."
+          fi
+
+      - name: Checkout repository
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download upstream binaries
+        if: steps.check_tag.outputs.exists == 'false'
+        env:
+          TAG: ${{ steps.extract_tag.outputs.tag }}
+        run: |
+          BASE_URL="https://github.com/dokku/coredns-docker/releases/download/${TAG}"
+          mkdir -p binaries/linux-amd64 binaries/linux-arm64
+
+          echo "Downloading coredns-docker-linux-amd64..."
+          curl -fsSL -o binaries/linux-amd64/coredns "${BASE_URL}/coredns-docker-linux-amd64"
+          chmod +x binaries/linux-amd64/coredns
+
+          echo "Downloading coredns-docker-linux-arm64..."
+          curl -fsSL -o binaries/linux-arm64/coredns "${BASE_URL}/coredns-docker-linux-arm64"
+          chmod +x binaries/linux-arm64/coredns
+
+      - name: Build and push Docker images
+        if: steps.check_tag.outputs.exists == 'false'
+        env:
+          TAG: ${{ steps.extract_tag.outputs.tag }}
+        run: |
+          REPO="${{ github.repository }}"
+          IMAGE="ghcr.io/${REPO,,}"
+
+          # 构建 amd64 镜像
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg TARGETARCH=amd64 \
+            --tag "${IMAGE}:${TAG}-amd64" \
+            --push \
+            .
+
+          # 构建 arm64 镜像
+          docker buildx build \
+            --platform linux/arm64 \
+            --build-arg TARGETARCH=arm64 \
+            --tag "${IMAGE}:${TAG}-arm64" \
+            --push \
+            .
+
+          # 创建并推送 multi-arch manifest
+          docker buildx imagetools create \
+            --tag "${IMAGE}:${TAG}" \
+            --tag "${IMAGE}:latest" \
+            "${IMAGE}:${TAG}-amd64" \
+            "${IMAGE}:${TAG}-arm64"
+
+      - name: Close issue
+        if: always() && steps.extract_tag.outputs.tag != ''
+        uses: peter-evans/close-issue@v3
+        with:
+          issue-number: ${{ github.event.issue.number }}
+          comment: |
+            ✅ Docker image built and pushed for tag `${{ steps.extract_tag.outputs.tag }}`.
+
+            Images:
+            - `ghcr.io/${{ github.repository }}:${{ steps.extract_tag.outputs.tag }}`
+            - `ghcr.io/${{ github.repository }}:${{ steps.extract_tag.outputs.tag }}-amd64`
+            - `ghcr.io/${{ github.repository }}:${{ steps.extract_tag.outputs.tag }}-arm64`
