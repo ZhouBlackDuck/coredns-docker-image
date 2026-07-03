@@ -30,7 +30,7 @@ jobs:
             --label "upstream-release" \
             --state open \
             --json number,title,author \
-            --jq '[.[] | select(.author.login == "app/github-actions" && .author.is_bot == true)]')
+            --jq '[.[] | select(.author.login == "app/github-actions" and .author.is_bot == true)]')
 
           COUNT=$(echo "$ISSUES" | jq 'length')
           if [ "$COUNT" -eq 0 ]; then
