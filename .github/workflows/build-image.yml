@@ -1,28 +1,58 @@
 name: Build and Push Docker Image
 
 on:
-  issues:
-    types: [opened]
+  # 在 Release Notifier 完成后自动触发
+  workflow_run:
+    workflows: ["Release Notifier"]
+    types: [completed]
 
 jobs:
   build:
-    # 仅处理由 github-actions[bot] 开启且带 upstream-release 标签的 issue
-    if: |
-      github.event.issue.user.login == 'github-actions[bot]' &&
-      contains(github.event.issue.labels.*.name, 'upstream-release')
     runs-on: ubuntu-latest
+    # 仅在 release-notifier 成功完成时运行（workflow_dispatch 时始终运行）
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     permissions:
       contents: read
       packages: write
       issues: write
 
     steps:
+      - name: Find open upstream-release issues
+        id: find_issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 查找由 github-actions[bot] 创建的带 upstream-release 标签的 open issue
+          ISSUES=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --label "upstream-release" \
+            --state open \
+            --json number,title,author \
+            --jq '[.[] | select(.author.login == "github-actions")]')
+
+          COUNT=$(echo "$ISSUES" | jq 'length')
+          if [ "$COUNT" -eq 0 ]; then
+            echo "No open upstream-release issues found."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 取最新的一个 issue
+          ISSUE_TITLE=$(echo "$ISSUES" | jq -r '.[0].title')
+          ISSUE_NUMBER=$(echo "$ISSUES" | jq -r '.[0].number')
+          echo "Found issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}"
+          echo "found=true" >> "$GITHUB_OUTPUT"
+          echo "issue_title=${ISSUE_TITLE}" >> "$GITHUB_OUTPUT"
+          echo "issue_number=${ISSUE_NUMBER}" >> "$GITHUB_OUTPUT"
+
       - name: Extract upstream release tag from issue
+        if: steps.find_issue.outputs.found == 'true'
         id: extract_tag
         run: |
-          # issue 标题格式通常为: "New release: <repo> <tag>"
-          ISSUE_TITLE="${{ github.event.issue.title }}"
-          # 提取版本号（最后一个空格后的内容）
+          ISSUE_TITLE="${{ steps.find_issue.outputs.issue_title }}"
+          # 标题格式: "New Version of coredns-docker <tag> available"
           UPSTREAM_TAG=$(echo "$ISSUE_TITLE" | grep -oP '[\d]+\.[\d]+\.[\d]+' | head -1)
           if [ -z "$UPSTREAM_TAG" ]; then
             echo "::error::Cannot extract tag from issue title: $ISSUE_TITLE"
@@ -32,6 +62,7 @@ jobs:
           echo "Detected upstream tag: ${UPSTREAM_TAG}"
 
       - name: Check if tag already exists in registry
+        if: steps.find_issue.outputs.found == 'true'
         id: check_tag
         env:
           TAG: ${{ steps.extract_tag.outputs.tag }}
@@ -48,19 +79,19 @@ jobs:
           fi
 
       - name: Checkout repository
-        if: steps.check_tag.outputs.exists == 'false'
+        if: steps.find_issue.outputs.found == 'true' && steps.check_tag.outputs.exists == 'false'
         uses: actions/checkout@v4
 
       - name: Set up QEMU
-        if: steps.check_tag.outputs.exists == 'false'
+        if: steps.find_issue.outputs.found == 'true' && steps.check_tag.outputs.exists == 'false'
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        if: steps.check_tag.outputs.exists == 'false'
+        if: steps.find_issue.outputs.found == 'true' && steps.check_tag.outputs.exists == 'false'
         uses: docker/setup-buildx-action@v3
 
       - name: Login to GitHub Container Registry
-        if: steps.check_tag.outputs.exists == 'false'
+        if: steps.find_issue.outputs.found == 'true' && steps.check_tag.outputs.exists == 'false'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -68,7 +99,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download upstream binaries
-        if: steps.check_tag.outputs.exists == 'false'
+        if: steps.find_issue.outputs.found == 'true' && steps.check_tag.outputs.exists == 'false'
         env:
           TAG: ${{ steps.extract_tag.outputs.tag }}
         run: |
@@ -84,7 +115,7 @@ jobs:
           chmod +x binaries/linux-arm64/coredns
 
       - name: Build and push Docker images
-        if: steps.check_tag.outputs.exists == 'false'
+        if: steps.find_issue.outputs.found == 'true' && steps.check_tag.outputs.exists == 'false'
         env:
           TAG: ${{ steps.extract_tag.outputs.tag }}
         run: |
@@ -115,10 +146,10 @@ jobs:
             "${IMAGE}:${TAG}-arm64"
 
       - name: Close issue
-        if: always() && steps.extract_tag.outputs.tag != ''
+        if: always() && steps.find_issue.outputs.found == 'true' && steps.extract_tag.outputs.tag != ''
         uses: peter-evans/close-issue@v3
         with:
-          issue-number: ${{ github.event.issue.number }}
+          issue-number: ${{ steps.find_issue.outputs.issue_number }}
           comment: |
             ✅ Docker image built and pushed for tag `${{ steps.extract_tag.outputs.tag }}`.
 
