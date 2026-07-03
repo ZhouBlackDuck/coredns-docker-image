@@ -6,8 +6,10 @@ on:
 
 jobs:
   build:
-    # 仅处理由 release-notifier 开启的 issue（带 upstream-release 标签）
-    if: contains(github.event.issue.labels.*.name, 'upstream-release')
+    # 仅处理由 github-actions[bot] 开启且带 upstream-release 标签的 issue
+    if: |
+      github.event.issue.user.login == 'github-actions[bot]' &&
+      contains(github.event.issue.labels.*.name, 'upstream-release')
     runs-on: ubuntu-latest
     permissions:
       contents: read

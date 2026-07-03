@@ -3,8 +3,8 @@ name: Release Notifier
 on:
   workflow_dispatch:
   schedule:
-    # 每天 UTC 00:00 检查上游是否有新 release
-    - cron: "0 0 * * *"
+    # 每周一 UTC 00:05 检查上游是否有新 release
+    - cron: "35 5 * * *"
 
 jobs:
   notify:
@@ -16,5 +16,5 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           type: Github
           repo: "https://github.com/dokku/coredns-docker"
-          days: 1
+          days: 7
           labels: "upstream-release"
