@@ -5,6 +5,7 @@ on:
   workflow_run:
     workflows: ["Release Notifier"]
     types: [completed]
+  workflow_dispatch: 
 
 jobs:
   build:
