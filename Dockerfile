@@ -1,4 +1,4 @@
-FROM scratch
+FROM alpine:3.22
 
 ARG TARGETARCH
 
