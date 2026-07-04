@@ -16,5 +16,5 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           type: Github
           repo: "https://github.com/dokku/coredns-docker"
-          days: 90
+          days: 1
           labels: "upstream-release"
