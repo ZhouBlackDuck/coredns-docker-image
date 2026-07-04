@@ -125,7 +125,7 @@ jobs:
           # 构建 amd64 镜像
           docker buildx build \
             --platform linux/amd64 \
-            --build-arg TARGETARCH=amd64 \
+            --provenance=false \
             --tag "${IMAGE}:${TAG}-amd64" \
             --push \
             .
@@ -133,7 +133,7 @@ jobs:
           # 构建 arm64 镜像
           docker buildx build \
             --platform linux/arm64 \
-            --build-arg TARGETARCH=arm64 \
+            --provenance=false \
             --tag "${IMAGE}:${TAG}-arm64" \
             --push \
             .
